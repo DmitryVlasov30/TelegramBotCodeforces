@@ -20,19 +20,30 @@ flag = True
 flag_work = True
 del_group = []
 chat_id = 'YOUR CHAT ID'
-login = 'YOUR LOGIN'
+login = 'YOUR LOGIN, YOU MUST SPECIFY THE HANDLE, NOT EMAIL'
 password = 'YOUR PASSWORD'
 number_proxy_server = 'YOUR PROXY SERVER'
 interval_requests = 'YOUR INTERVAL REQUESTS (seconds, int)'
 
 
 try:
+    def admin_func(func):
+        async def wrapper(message: Message):
+            global chat_id
+            if str(message.chat.id) != chat_id:
+                await message.answer('Отправлять сообщения может владелец')
+                return None
+            function = await func(message)
+            return function
+        return wrapper
+
     def changes_arr(otv):
-        global last, now
+        global last, now, login
 
         now = otv
         changes = []
-
+        delete_changes = []
+        delete_last = []
         if len(last) != 0 and now != last:
             for i in range(len(now)):
                 flag_loc = False
@@ -42,6 +53,26 @@ try:
                 if not flag_loc:
                     changes.append(now[i])
         last = otv
+        for i in range(len(changes)):
+            if changes[i][3] == 'В очереди':
+                delete_changes.append([i, changes[i][0]])
+
+            elif changes[i][1] == login:
+                delete_changes.append([i, -1])
+
+        for i in range(len(last)):
+            flag_delete = False
+            for j in range(len(delete_changes)):
+                if delete_changes[j][1] == last[i][0]:
+                    flag_delete = True
+            if last[i][3] == 'В очереди' and flag_delete:
+                delete_last.append(i)
+
+        for el in delete_last:
+            del last[el]
+
+        for el in delete_changes:
+            del changes[el[0]]
 
         return changes
 
@@ -149,7 +180,7 @@ try:
             otv_gl = []
 
             if len(groups) == 0:
-                return 0
+                return None
 
             for group in range(len(groups)):
                 driver.get(f"https://codeforces.com/group/{groups[group][0]}/contests")
@@ -289,11 +320,7 @@ try:
             await bot.send_message(chat_id, message_inf, parse_mode='html')
 
 
-    async def my_inf(message: Message):
-        inf = str(message.from_user.id)
-        await message.answer(inf)
-
-
+    @admin_func
     async def delete_group(message: Message):
         global codeforces_groups
 
@@ -312,6 +339,7 @@ try:
         del codeforces_groups[index_group]
 
 
+    @admin_func
     async def update_groups(message: Message):
         global codeforces_groups
 
@@ -323,6 +351,7 @@ try:
         codeforces_groups.append(group)
         await message.answer('Группа добавлена')
 
+    @admin_func
     async def my_groups(message: Message):
         global codeforces_groups
         inf_group = ''
@@ -331,24 +360,28 @@ try:
         await message.answer(f"Ваши группы:\n{inf_group}", parse_mode='html')
 
 
+    @admin_func
     async def off_bot(message: Message):
         global flag_work
         flag_work = False
         await message.answer('Работа бота приостановлена')
 
 
+    @admin_func
     async def on_bot(message: Message):
         global flag_work
         flag_work = True
         await message.answer("Бот работает")
 
 
+    @admin_func
     async def status_bot(message: Message):
         global flag_work
         if flag_work:
             await message.answer("Бот работает")
         else:
             await message.answer("Бот приостановлен")
+
 
 except Exception as all_mistake:
     print(all_mistake)
@@ -362,7 +395,6 @@ async def main():
 
     dp = Dispatcher()
     dp.message.register(start, Command(commands=["start"]))
-    dp.message.register(my_inf, Command(commands=["my_inf"]))
     dp.message.register(my_groups, Command(commands=['my_groups']))
     dp.message.register(off_bot, Command(commands=["off"]))
     dp.message.register(on_bot, Command(commands=["on"]))
@@ -371,11 +403,13 @@ async def main():
     dp.message.register(delete_group, Command(commands=['delete']))
 
     scheduler = AsyncIOScheduler(time_zone='Europe/Moscow')
-    scheduler.add_job(name_changes, trigger='interval', seconds=int(interval_requests), kwargs={'bot': bot})
+    scheduler.add_job(name_changes, trigger='interval', seconds=60, kwargs={'bot': bot})
     scheduler.start()
 
     try:
         await dp.start_polling(bot, skip_updates=True)
     finally:
         await bot.session.close()
+
+print('bot worked')
 asyncio.run(main())
