@@ -1,20 +1,19 @@
-from aiogram import Bot, Dispatcher
-from aiogram.filters import Command
-from aiogram.types import Message
-# надо для сервера
-# from aiogram.client.session.aiohttp import AiohttpSession
-import asyncio
+from telebot import TeleBot
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from datetime import datetime
+from threading import Timer
+import sqlite3
+
+
 
 
 token = "TOKEN"
-last = []
-now = []
+bot = TeleBot(token=token)
+last = now = []
 codeforces_groups = []
 flag = True
 flag_work = True
@@ -22,20 +21,21 @@ del_group = []
 chat_id = 'YOUR CHAT ID'
 login = 'YOUR LOGIN, YOU MUST SPECIFY THE HANDLE, NOT EMAIL'
 password = 'YOUR PASSWORD'
-number_proxy_server = 'YOUR PROXY SERVER'
 interval_requests = 'YOUR INTERVAL REQUESTS (seconds, int)'
+global_flag_stop = ''
 
 
 try:
     def admin_func(func):
-        async def wrapper(message: Message):
+        def wrapper(message):
             global chat_id
             if str(message.chat.id) != chat_id:
-                await message.answer('Отправлять сообщения может владелец')
-                return None
-            function = await func(message)
+                message.answer('Отправлять сообщения может владелец')
+                return
+            function = func(message)
             return function
         return wrapper
+
 
     def changes_arr(otv):
         global last, now, login
@@ -154,6 +154,7 @@ try:
         chrome_options.add_argument("--headless=new")
 
         driver = webdriver.Chrome(options=chrome_options)
+
         try:
             driver.get(url=f"https://codeforces.com/enter?back=%2Fprofile%2F{login}")
             driver.find_element("id", "handleOrEmail").send_keys(login)
@@ -180,7 +181,7 @@ try:
             otv_gl = []
 
             if len(groups) == 0:
-                return None
+                return
 
             for group in range(len(groups)):
                 driver.get(f"https://codeforces.com/group/{groups[group][0]}/contests")
@@ -251,77 +252,85 @@ try:
             changes = sorted(changes, key=lambda x: x[4])
 
             return changes
+
         except Exception as ex:
             return ex
+
         finally:
             driver.close()
             driver.quit()
 
-
-    async def start(message: Message):
-        await message.answer(
+    @bot.message_handler(commands=["start"])
+    def start(message):
+        message.answer(
             "Здравствуйте.\n"
             "Текст с объяснением работы бота находится на GitHub -> https://github.com/DmitryVlasov30/TelegramBotParser"
         )
+        start_timer(message)
 
 
-    async def name_changes(bot: Bot):
+    def name_changes(message):
         global flag, codeforces_groups, flag_work, del_group, chat_id
+        try:
+            if len(codeforces_groups) == 0 or not flag_work:
+                return
 
-        if len(codeforces_groups) == 0 or not flag_work:
-            return None
+            changes_loc = web()
 
-        changes_loc = web()
+            if len(del_group) != 0:
+                inf_del_groups = ''
+                del_groups_in_codeforces_group = []
 
-        if len(del_group) != 0:
-            inf_del_groups = ''
-            del_groups_in_codeforces_group = []
+                for i in range(len(del_group)):
+                    inf_del_groups += del_group[i] + "\n"
+                    for j in range(len(codeforces_groups)):
+                        if del_group[i] == codeforces_groups[j]:
+                            del_groups_in_codeforces_group.append(codeforces_groups[j])
 
-            for i in range(len(del_group)):
-                inf_del_groups += del_group[i] + "\n"
-                for j in range(len(codeforces_groups)):
-                    if del_group[i] == codeforces_groups[j]:
-                        del_groups_in_codeforces_group.append(codeforces_groups[j])
+                for i in range(len(del_groups_in_codeforces_group)):
+                    codeforces_groups.remove(del_groups_in_codeforces_group[i])
 
-            for i in range(len(del_groups_in_codeforces_group)):
-                codeforces_groups.remove(del_groups_in_codeforces_group[i])
+                del_group.clear()
+                bot.send_message(
+                    chat_id, f'Эти группы удалены:\n{inf_del_groups}\nпотому что их не существует'
+                )
+                return
 
-            del_group.clear()
-            await bot.send_message(
-                chat_id, f'Эти группы удалены:\n{inf_del_groups}\nпотому что их не существует'
-            )
-            return None
+            if not isinstance(changes_loc, list) and flag:
+                flag = False
+                bot.send_message(chat_id, "Что то пошло не так, информацию не удалось получить :(")
+                return
 
-        if not isinstance(changes_loc, list) and flag:
-            flag = False
-            await bot.send_message(chat_id, "Что то пошло не так, информацию не удалось получить :(")
-            return None
+            if len(changes_loc) != 0:
+                flag = True
+                message_inf = ''
+                time_format = '%H:%M'
+                time1 = datetime.strptime(changes_loc[0][4], time_format)
+                for i in range(len(changes_loc)):
+                    flag_time = False
+                    time_i = datetime.strptime(changes_loc[i][4], time_format)
+                    if abs(time1 - time_i).total_seconds() > 3600:
+                        flag_time = True
+                    message_inf += f'{changes_loc[i][4]}' \
+                                   f'\nПользователь <b>{changes_loc[i][1]}</b> сдал задачу:\n' \
+                                   f'<u>{changes_loc[i][2]}</u>' \
+                                   f' из контеста <u>{changes_loc[i][7].strip()}</u>\n' \
+                                   f'Вердикт:\n' \
+                                   f'<b>{changes_loc[i][3]}</b>\n' \
+                                   f'ссылка -> {changes_loc[i][-1]}'
+                    if i != len(changes_loc) - 1 and not flag_time:
+                        message_inf += '\n\n'
 
-        if len(changes_loc) != 0:
-            flag = True
-            message_inf = ''
-            time_format = '%H:%M'
-            time1 = datetime.strptime(changes_loc[0][4], time_format)
-            for i in range(len(changes_loc)):
-                flag_time = False
-                time_i = datetime.strptime(changes_loc[i][4], time_format)
-                if abs(time1 - time_i).total_seconds() > 3600:
-                    flag_time = True
-                message_inf += f'{changes_loc[i][4]}' \
-                               f'\nПользователь <b>{changes_loc[i][1]}</b> сдал задачу:\n' \
-                               f'<u>{changes_loc[i][2]}</u>' \
-                               f' из контеста <u>{changes_loc[i][7].strip()}</u>\n' \
-                               f'Вердикт:\n' \
-                               f'<b>{changes_loc[i][3]}</b>\n' \
-                               f'ссылка -> {changes_loc[i][-1]}'
-                if i != len(changes_loc) - 1 and not flag_time:
-                    message_inf += '\n\n'
-
-            await bot.send_message(chat_id, message_inf, parse_mode='html')
+                bot.send_message(chat_id, message_inf, parse_mode='html')
+        except Exception as ex:
+            bot.send_message(chat_id, f"Произошла ошибка {ex}")
+        finally:
+            start_timer(bot)
 
 
+    @bot.message_handler(commands=["del"])
     @admin_func
-    async def delete_group(message: Message):
+    def delete_group(message):
         global codeforces_groups
 
         group = message.text[7:].strip()
@@ -332,84 +341,78 @@ try:
                 index_group = i
 
         if index_group == -1:
-            await message.answer(f'Группа {group} не найдена')
-            return None
+            bot.send_message(message.chat.id, f'Группа {group} не найдена')
+            return
 
-        await message.answer(f'Группа {codeforces_groups[index_group]} удалена')
+        bot.send_message(message.chat.id, f'Группа {codeforces_groups[index_group]} удалена')
         del codeforces_groups[index_group]
 
 
+    @bot.message_handler(commands=["add"])
     @admin_func
-    async def update_groups(message: Message):
+    def update_groups(message):
         global codeforces_groups
 
         group = message.text[5:].strip()
         if group == '':
-            await message.answer('Нельзя добавить пустую группу')
-            return None
+            bot.send_message(message.chat.id, 'Нельзя добавить пустую группу')
+            return
 
         codeforces_groups.append(group)
-        await message.answer('Группа добавлена')
+        bot.send_message(message.chat.id, 'Группа добавлена')
 
+
+    @bot.message_handler(comands=["groups"])
     @admin_func
-    async def my_groups(message: Message):
+    def my_groups(message):
         global codeforces_groups
         inf_group = ''
         for el in codeforces_groups:
             inf_group += f'<b>{el}</b>' + '\n'
-        await message.answer(f"Ваши группы:\n{inf_group}", parse_mode='html')
+        bot.send_message(message.chat.id, f"Ваши группы:\n{inf_group}", parse_mode='html')
 
 
+    @bot.message_handler(commands=["off"])
     @admin_func
-    async def off_bot(message: Message):
+    def off_bot(message):
         global flag_work
         flag_work = False
-        await message.answer('Работа бота приостановлена')
+        message.answer('Работа бота приостановлена')
 
 
+    @bot.message_handler(commands=["on"])
     @admin_func
-    async def on_bot(message: Message):
+    def on_bot(message):
         global flag_work
         flag_work = True
-        await message.answer("Бот работает")
+        bot.send_message(message.chat.id, "Бот работает")
 
 
+    @bot.message_handler(commands=["status"])
     @admin_func
-    async def status_bot(message: Message):
+    def status_bot(message):
         global flag_work
         if flag_work:
-            await message.answer("Бот работает")
+            bot.send_message(message.chat.id, "Бот работает")
         else:
-            await message.answer("Бот приостановлен")
+            bot.send_message(message.chat.id, "Бот приостановлен")
+
+
+    def start_timer(message):
+        global interval_requests
+        Timer(int(interval_requests), name_changes, args=(message,)),start()
+
+
+    @bot.message_handler(commands=["stop"])
+    def stop_bot(message):
+        bot.send_message("работа бота завершена")
+        bot.stop_bot()
+
 
 
 except Exception as all_mistake:
-    print(all_mistake)
+    bot.send_message(chat_id, f"Произошла ошибка: {all_mistake}")
 
-
-async def main():
-    global token, number_proxy_server, interval_requests
-
-    # session = AiohttpSession(proxy='http://proxy.server:{number_proxy_server}')
-    bot = Bot(token=token)
-
-    dp = Dispatcher()
-    dp.message.register(start, Command(commands=["start"]))
-    dp.message.register(my_groups, Command(commands=['my_groups']))
-    dp.message.register(off_bot, Command(commands=["off"]))
-    dp.message.register(on_bot, Command(commands=["on"]))
-    dp.message.register(status_bot, Command(commands=['status']))
-    dp.message.register(update_groups, Command(commands=['add']))
-    dp.message.register(delete_group, Command(commands=['delete']))
-
-    scheduler = AsyncIOScheduler(time_zone='Europe/Moscow')
-    scheduler.add_job(name_changes, trigger='interval', seconds=60, kwargs={'bot': bot})
-    scheduler.start()
-
-    try:
-        await dp.start_polling(bot, skip_updates=True)
-    finally:
-        await bot.session.close()
 
 print('bot worked')
-asyncio.run(main())
+bot.infinity_polling(timeout=10, long_polling_timeout=150)
